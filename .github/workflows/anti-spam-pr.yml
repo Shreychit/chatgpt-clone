@@ -1,0 +1,73 @@
+name: Auto-close spammy PRs
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect & close spam
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const pr = context.payload.pull_request;
+
+            // Skip trusted collaborators
+            const perm = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner, repo, username: pr.user.login
+            }).catch(() => null);
+            const trusted = perm && ['admin','maintain','write'].includes(perm.data.permission);
+            if (trusted) { return; }
+
+            // Author age
+            const u = await github.rest.users.getByUsername({ username: pr.user.login });
+            const accountAgeDays = (Date.now() - new Date(u.data.created_at).getTime()) / 86400000;
+
+            // Changed files
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              { owner, repo, pull_number: pr.number, per_page: 100 }
+            );
+            const adds = files.reduce((s,f)=>s+f.additions,0);
+            const dels = files.reduce((s,f)=>s+f.deletions,0);
+            const changes = adds + dels;
+
+            const onlyDocs = files.every(f =>
+              /\.(md|rst|txt)$/i.test(f.filename) || f.filename.startsWith('docs/')
+            );
+            const onlyReadme = files.length === 1 && /(^|\/)readme\.md$/i.test(files[0].filename);
+
+            const title = (pr.title || '').toLowerCase();
+            const body = (pr.body || '').toLowerCase();
+            const hasLinkedIssue = /(#\d+)|(fixe?s|close[sd]?)\s+#\d+/.test(body);
+            const looksLikeNameDrop = /(add(ed)?\s+.*name|my\s+(name|portfolio|github)|contributor)/i.test(title + ' ' + body);
+            const looksLikeReadmeSpam = (onlyReadme && changes <= 20) || (title.includes('readme') && changes <= 15);
+
+            const isLikelySpam =
+              (!hasLinkedIssue && (onlyDocs || looksLikeReadmeSpam || looksLikeNameDrop)) ||
+              (accountAgeDays < 14 && onlyDocs && changes < 30);
+
+            if (!isLikelySpam) return;
+
+            // Label, comment, close, (optionally) lock
+            const labels = ['spam', 'invalid', 'autoclosed'];
+            await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels }).catch(()=>{});
+
+            const msg = `👋 Thanks for the PR, but this repo doesn't accept cosmetic README-only or "add my name" changes.
+
+**Why this was auto-closed**
+- Only docs/README changed with a tiny diff
+- No linked issue/discussion for context${accountAgeDays < 14 ? '\n- New account (<14 days old)' : ''}
+
+If misclassified, a maintainer can remove the \`autoclosed\` label and re-open.`;
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: msg });
+            await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+            await github.rest.issues.lock({ owner, repo, issue_number: pr.number, lock_reason: 'spam' }).catch(()=>{});
