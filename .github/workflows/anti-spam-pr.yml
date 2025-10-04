@@ -17,21 +17,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const {owner, repo} = context.repo;
+            const { owner, repo } = context.repo;
             const pr = context.payload.pull_request;
 
-            // Skip trusted collaborators
-            # const perm = await github.rest.repos.getCollaboratorPermissionLevel({
-            #   owner, repo, username: pr.user.login
-            # }).catch(() => null);
-            # const trusted = perm && ['admin','maintain','write'].includes(perm.data.permission);
-            # if (trusted) { return; }
-
-            // Author age
+            // ---- Author/account info
             const u = await github.rest.users.getByUsername({ username: pr.user.login });
-            const accountAgeDays = (Date.now() - new Date(u.data.created_at).getTime()) / 86400000;
+            const accountAgeDays = Math.floor((Date.now() - new Date(u.data.created_at)) / 86400000);
 
-            // Changed files
+            // ---- Changed files / diff stats
             const files = await github.paginate(
               github.rest.pulls.listFiles,
               { owner, repo, pull_number: pr.number, per_page: 100 }
@@ -55,11 +48,18 @@ jobs:
               (!hasLinkedIssue && (onlyDocs || looksLikeReadmeSpam || looksLikeNameDrop)) ||
               (accountAgeDays < 14 && onlyDocs && changes < 30);
 
+            core.notice(`files=${files.map(f=>f.filename).join(', ')}`);
+            core.notice(`adds=${adds} dels=${dels} changes=${changes}`);
+            core.notice(`onlyDocs=${onlyDocs} onlyReadme=${onlyReadme} hasLinkedIssue=${hasLinkedIssue} accountAgeDays=${accountAgeDays}`);
+            core.notice(`decision=${isLikelySpam ? 'SPAM→close' : 'OK→keep open'}`);
+
             if (!isLikelySpam) return;
 
-            // Label, comment, close, lock
+            // ---- Label, comment, close, lock
             const labels = ['spam', 'invalid', 'autoclosed'];
-            await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels }).catch(()=>{});
+            try {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
+            } catch {}
 
             const msg = `👋 Thanks for the PR, but this repo doesn't accept cosmetic README-only or "add my name" changes.
 
@@ -68,6 +68,9 @@ jobs:
 - No linked issue/discussion for context${accountAgeDays < 14 ? '\n- New account (<14 days old)' : ''}
 
 If misclassified, a maintainer can remove the \`autoclosed\` label and re-open.`;
+
             await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: msg });
             await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
-            await github.rest.issues.lock({ owner, repo, issue_number: pr.number, lock_reason: 'spam' }).catch(()=>{});
+            try {
+              await github.rest.issues.lock({ owner, repo, issue_number: pr.number, lock_reason: 'spam' });
+            } catch {}
