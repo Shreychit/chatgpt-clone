@@ -1,5 +1,6 @@
 name: Auto-close spammy PRs
 
+
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
