@@ -1,6 +1,5 @@
 name: Auto-close spammy PRs
 
-
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
@@ -22,11 +21,11 @@ jobs:
             const pr = context.payload.pull_request;
 
             // Skip trusted collaborators
-            const perm = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner, repo, username: pr.user.login
-            }).catch(() => null);
-            const trusted = perm && ['admin','maintain','write'].includes(perm.data.permission);
-            if (trusted) { return; }
+            # const perm = await github.rest.repos.getCollaboratorPermissionLevel({
+            #   owner, repo, username: pr.user.login
+            # }).catch(() => null);
+            # const trusted = perm && ['admin','maintain','write'].includes(perm.data.permission);
+            # if (trusted) { return; }
 
             // Author age
             const u = await github.rest.users.getByUsername({ username: pr.user.login });
@@ -58,7 +57,7 @@ jobs:
 
             if (!isLikelySpam) return;
 
-            // Label, comment, close, (optionally) lock
+            // Label, comment, close, lock
             const labels = ['spam', 'invalid', 'autoclosed'];
             await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels }).catch(()=>{});
 
