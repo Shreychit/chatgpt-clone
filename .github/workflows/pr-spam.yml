@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # flip to 'true' only while testing on your own PRs
-      ALLOW_CLOSE_TRUSTED: 'false'
+      ALLOW_CLOSE_TRUSTED: 'true'
 
     steps:
       - name: Prepare PR context
