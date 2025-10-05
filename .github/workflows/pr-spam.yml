@@ -74,6 +74,11 @@ jobs:
               labels: ['pr-spam']
             }).catch(()=>{});
 
+      - name: Check out prompts
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: AI assess PR
         id: ai
         uses: github/ai-assessment-comment-labeler@main
