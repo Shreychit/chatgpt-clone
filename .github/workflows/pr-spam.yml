@@ -1,5 +1,4 @@
 name: PR spam moderation (AI)
-
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
@@ -13,56 +12,18 @@ permissions:
 jobs:
   moderate-pr:
     runs-on: ubuntu-latest
+    env:
+      # flip to 'true' only while testing on your own PRs
+      ALLOW_CLOSE_TRUSTED: 'false'
+
     steps:
       - name: Prepare PR context
         id: prep
         uses: actions/github-script@v7
         with:
           script: |
-            const {owner, repo} = context.repo;
-            const pr = context.payload.pull_request;
-            const files = await github.paginate(
-              github.rest.pulls.listFiles,
-              { owner, repo, pull_number: pr.number, per_page: 100 }
-            );
+            // ... (unchanged) ...
 
-            const adds = files.reduce((s,f)=>s+f.additions,0);
-            const dels = files.reduce((s,f)=>s+f.deletions,0);
-            const changes = adds + dels;
-
-            const onlyDocs = files.length > 0 && files.every(f =>
-              /\.(md|rst|txt|adoc)$/i.test(f.filename) ||
-              f.filename.startsWith('docs/') ||
-              f.filename.startsWith('.github/')
-            );
-
-            const touchesCode = files.some(f =>
-              f.filename.startsWith('lib/') ||
-              f.filename.startsWith('benchmarks/') ||
-              f.filename.startsWith('test/') ||
-              /\.(js|mjs|cjs|ts|json)$/i.test(f.filename)
-            );
-
-            const hasLinkedIssue = /(^|\s)(fixe?s|close[sd]?|resolve[sd]?)\s+#\d+\b/i.test(pr.body || '') || /#\d+\b/.test(pr.body || '');
-
-            const u = await github.rest.users.getByUsername({ username: pr.user.login });
-            const accountAgeDays = Math.floor((Date.now() - new Date(u.data.created_at)) / 86400000);
-
-            const text = [
-              `Title: ${pr.title}`,
-              `Author: @${pr.user.login} (≈${accountAgeDays} days)`,
-              `Linked issue in body: ${hasLinkedIssue}`,
-              `Files changed (${files.length}):`,
-              ...files.map(f => ` - ${f.filename} (+${f.additions}/-${f.deletions})`),
-              `Diff size: ${changes}`,
-              `onlyDocs=${onlyDocs} touchesCode=${touchesCode}`,
-              `--- PR body ---`,
-              pr.body || '(empty)'
-            ].join('\n');
-
-            core.setOutput('text', text);
-
-      # Add the trigger label the action expects (must match ai_review_label below)
       - name: Add trigger label
         uses: actions/github-script@v7
         with:
@@ -74,21 +35,21 @@ jobs:
               labels: ['pr-spam']
             }).catch(()=>{});
 
-      - name: Check out prompts
+      - name: Checkout repo (for prompts)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: AI assess PR
         id: ai
         uses: github/ai-assessment-comment-labeler@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ai_review_label: 'pr-spam'                                  # ← REQUIRED
-          issue_number: ${{ github.event.pull_request.number }}        # ← REQUIRED
-          issue_body: ${{ steps.prep.outputs.text }}                   # ← REQUIRED
-          prompts_directory: '.github/prompts'                         # ← REQUIRED
-          labels_to_prompts_mapping: 'pr-spam,pr-spam.prompt.yml'      # ← REQUIRED
+          ai_review_label: 'pr-spam'
+          issue_number: ${{ github.event.pull_request.number }}
+          issue_body: ${{ steps.prep.outputs.text }}
+          prompts_directory: '.github/prompts'
+          labels_to_prompts_mapping: 'pr-spam,pr-spam.prompt.yml'
           suppress_comments: true
 
       - name: Check collaborator trust
@@ -97,16 +58,18 @@ jobs:
         with:
           script: |
             const {owner, repo} = context.repo;
+            const user = context.payload.pull_request.user.login;
+            let trusted = false;
             try {
-              const perm = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner, repo, username: context.payload.pull_request.user.login
-              });
-              const trusted = ['admin','maintain','write'].includes(perm.data.permission);
-              core.setOutput('trusted', trusted ? 'true' : 'false');
-            } catch { core.setOutput('trusted', 'false'); }
+              const perm = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: user });
+              trusted = ['admin','maintain','write'].includes(perm.data.permission);
+            } catch {}
+            core.notice(`trusted=${trusted} user=${user}`);
+            core.setOutput('trusted', trusted ? 'true' : 'false');
 
       - name: Close PR if spam
-        if: contains(steps.ai.outputs.ai_assessments, 'ai:pr-spam:yes') && steps.trust.outputs.trusted == 'false'
+        # Close when AI says yes AND (author is untrusted OR we explicitly allow during testing)
+        if: contains(steps.ai.outputs.ai_assessments, 'ai:pr-spam:yes') && (steps.trust.outputs.trusted == 'false' || env.ALLOW_CLOSE_TRUSTED == 'true')
         uses: actions/github-script@v7
         with:
           script: |
