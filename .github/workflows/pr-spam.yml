@@ -1,4 +1,5 @@
 name: PR spam moderation (AI)
+
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
@@ -49,7 +50,7 @@ jobs:
 
             const text = [
               `Title: ${pr.title}`,
-              `Author: @${pr.user.login} (≈${accountAgeDays} days old)`,
+              `Author: @${pr.user.login} (≈${accountAgeDays} days)`,
               `Linked issue in body: ${hasLinkedIssue}`,
               `Files changed (${files.length}):`,
               ...files.map(f => ` - ${f.filename} (+${f.additions}/-${f.deletions})`),
@@ -61,19 +62,30 @@ jobs:
 
             core.setOutput('text', text);
 
-      # Ask the official AI assessor to label YES/NO for spam
+      # Add the trigger label the action expects (must match ai_review_label below)
+      - name: Add trigger label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            await github.rest.issues.addLabels({
+              owner, repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['pr-spam']
+            }).catch(()=>{});
+
       - name: AI assess PR
         id: ai
         uses: github/ai-assessment-comment-labeler@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          issue_number: ${{ github.event.pull_request.number }}
-          issue_body: ${{ steps.prep.outputs.text }}
-          prompts_directory: '.github/prompts'
-          labels_to_prompts_mapping: 'pr-spam,pr-spam.prompt.yml'
+          ai_review_label: 'pr-spam'                                  # ← REQUIRED
+          issue_number: ${{ github.event.pull_request.number }}        # ← REQUIRED
+          issue_body: ${{ steps.prep.outputs.text }}                   # ← REQUIRED
+          prompts_directory: '.github/prompts'                         # ← REQUIRED
+          labels_to_prompts_mapping: 'pr-spam,pr-spam.prompt.yml'      # ← REQUIRED
           suppress_comments: true
 
-      # Skip trusted collaborators (keeps false positives near-zero)
       - name: Check collaborator trust
         id: trust
         uses: actions/github-script@v7
@@ -88,7 +100,6 @@ jobs:
               core.setOutput('trusted', trusted ? 'true' : 'false');
             } catch { core.setOutput('trusted', 'false'); }
 
-      # Close only when AI says YES and author isn't trusted
       - name: Close PR if spam
         if: contains(steps.ai.outputs.ai_assessments, 'ai:pr-spam:yes') && steps.trust.outputs.trusted == 'false'
         uses: actions/github-script@v7
