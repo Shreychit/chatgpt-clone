@@ -61,13 +61,16 @@ jobs:
               await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
             } catch {}
 
-            const msg = `👋 Thanks for the PR, but this repo doesn't accept cosmetic README-only or "add my name" changes.
-
-**Why this was auto-closed**
-- Only docs/README changed with a tiny diff
-- No linked issue/discussion for context${accountAgeDays < 14 ? '\n- New account (<14 days old)' : ''}
-
-If misclassified, a maintainer can remove the \`autoclosed\` label and re-open.`;
+            const msgLines = [
+              "👋 Thanks for the PR, but this repo doesn't accept cosmetic README-only or \"add my name\" changes.",
+              "",
+              "**Why this was auto-closed**",
+              "- Only docs/README changed with a tiny diff",
+              `- No linked issue/discussion for context${accountAgeDays < 14 ? '\n- New account (<14 days old)' : ''}`,
+              "",
+              "If misclassified, a maintainer can remove the `autoclosed` label and re-open."
+            ];
+            const msg = msgLines.join('\n');
 
             await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: msg });
             await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
