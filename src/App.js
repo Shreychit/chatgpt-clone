@@ -69,7 +69,7 @@ const App = () => {
   return (
     <div className="app">
       <section className="side-bar">
-        <button onClick={createNewChat}>+ New Chat</button>
+        <button onClick={createNewChat}>+ New CHAT New</button>
         <ul className="history">
           {uniqueTitles?.map((uniqueTitle, index) => <li key={index} onClick={() => handleClick(uniqueTitle)}>{uniqueTitle}</li>)}
         </ul>
